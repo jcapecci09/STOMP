@@ -7,6 +7,7 @@ Author: Jimmy Capecci
 """
 
 import argparse
+import math
 
 
 def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
@@ -30,10 +31,10 @@ def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
 
     # initalize empty profile
     prof = {
-        'A': {i: 0 for i in range(k)},
-        'T': {i: 0 for i in range(k)},
-        'C': {i: 0 for i in range(k)},
-        'G': {i: 0 for i in range(k)}
+        'A': {i: 1 for i in range(k)},
+        'T': {i: 1 for i in range(k)},
+        'C': {i: 1 for i in range(k)},
+        'G': {i: 1 for i in range(k)}
     }
 
     # for each motif in the list of motifs
@@ -43,7 +44,7 @@ def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
             prof[base][pos] += 1
 
     # find length of profile
-    total = len(motifs)
+    total = len(motifs) + 4
 
     # for each base in profile find percentage of occurence
     for base in prof:
@@ -136,24 +137,47 @@ def hamming(motif1: str, motif2: str) -> int:
     return h_distance
 
 
-def score(prof: dict[str, dict[int, float]], k: int, motifs: list) -> int:
+def entropy(profile: dict[str, dict[int, float]], k) -> int:
+    """Entropy scoring function that just uses profile to determine 
+    how uncertain 
+
+    :param profile: profile of motifs
+    :return: Entropy score
+    """
+    e_total = 0
+    for pos in range(k):
+        for base in ('A', 'T', 'C', 'G'):
+            prob = profile[base][pos]
+            e_total += -prob * math.log2(prob)
+
+
+    return e_total
+    
+
+
+def score(prof: dict[str, dict[int, float]], k: int, motifs: list, scoring_function: str) -> int:
     """find score of set of motifs using the consensus motif 
     and hamming distance
 
     :param prof: profile of motifs
     :param k: size of motifs
     :param motifs: set of motifs
+    :param scoring_function: determines either consensus or entropy scoring function
     :return: score
     """
 
-    # find the consensus motif
-    consensus_string = consensus(prof, k)
-    final_score = 0
+    if scoring_function == 'Hamming':
+        # find the consensus motif
+        consensus_string = consensus(prof, k)
+        final_score = 0
 
-    #  for each motif in set of motifs find the final score
-    for motif in motifs:
-        final_score += hamming(consensus_string, motif)
-    return final_score
+        #  for each motif in set of motifs find the final score
+        for motif in motifs:
+            final_score += hamming(consensus_string, motif)
+        return final_score
+
+    else:
+        return entropy(prof, k)
             
 
 def main():
@@ -162,6 +186,8 @@ def main():
     parser = argparse.ArgumentParser(description='Greedy Motif Search')
     parser.add_argument('-i', '--input', required=True, help='input file')
     parser.add_argument('-o', '--output', required=True, help='output file')
+    parser.add_argument('-s', '--scoring_function', required=False, default='Entropy', 
+                        help='Defines scoring function used')
 
     # parse arguements
     args = parser.parse_args()
@@ -199,7 +225,7 @@ def main():
 
         # find final profile and score 
         final_profile = profile(current_motifs, k)
-        current_score = score(final_profile, k, current_motifs)
+        current_score = score(final_profile, k, current_motifs, args.scoring_function)
 
         # if score is better, its the best kmer profile
         if current_score < best_score:
