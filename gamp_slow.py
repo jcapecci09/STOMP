@@ -1,13 +1,16 @@
-"""Greedy motif finding algorithm.
+"""Gibbs-based Algorithm for Motif Prediction (GAMP)
 
 Reads DNA sequences and motif length from an input file and finds the
-most likely set of motifs using Greedy Motif Search.
+most likely set of motifs using a gibbs sampler, motif profiles, 
 
 Author: Jimmy Capecci
 """
 
 import argparse
 import math
+from random import randint, random
+import logomaker
+import matplotlib.pyplot as plt
 
 
 def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
@@ -54,7 +57,7 @@ def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
     return prof
 
 
-def profile_most_probable(prof: dict[str, dict[int, float]], seq: str, k:int) -> str:
+def gibbs_sampler(prof: dict[str, dict[int, float]], seq: str, k:int) -> str:
     """Finds the motif with the highest probability according to a profile.
 
     :param prof: nested dictionary containing the motif profile
@@ -63,32 +66,46 @@ def profile_most_probable(prof: dict[str, dict[int, float]], seq: str, k:int) ->
     :return: motif with the highest probability
     """
 
-    # intialize best percentage at -1
-    largest_percentage = -1
-    best_motif = ''
+    # 
+    kmer_prob_dict = {}
+    prob_sum = 0
 
     # form each motif in sequence find the best motif
     for i in range(len(seq) - k + 1):
 
-        # find motif
-        motif = seq[i:i+k]
-        
-        # intialize percentage = to 1
-        percentage =  1
+        # grab kmer and add to list
+        kmer = seq[i:i+k]
 
-        # find the likelhood of current motif
+        # intialize prob = to 1
+        prob =  1
+
+        # find the likelhood of current kmer
         # that it matches the profile
-        for pos, base in enumerate(motif):
-            percentage *= prof[base][pos]
+        for pos, base in enumerate(kmer):
+            prob *= prof[base][pos]
+        kmer_prob_dict[kmer] = prob
+        prob_sum += prob
 
-        # if percentage is greater than the current largest 
-        # it is the best motif
-        if percentage > largest_percentage:
-            largest_percentage = percentage 
-            best_motif = motif
-    return best_motif
+    # normalize the probabilities so they are between [0, 1]
+    kmer_prob_normalized = {key: value / prob_sum for key, value in kmer_prob_dict.items()}
 
-    
+    # sort probabilities in ascending order
+    sorted_kmer_prob = dict(sorted(kmer_prob_normalized.items(), key=lambda x: x[1]))
+
+    # draw random number between [0, 1]
+    draw = random()
+    cumulative = 0.0
+
+    # probabilistically pick a kmer
+    for kmer, prob in sorted_kmer_prob.items():
+        cumulative += prob
+        if draw <= cumulative:
+            return kmer
+
+    # fallback if rounding makes the draw fall just above the end
+    return max(sorted_kmer_prob, key=sorted_kmer_prob.get)
+
+
 def consensus(prof: dict[str, dict[int, float]], k: int) -> str:
     """Builds the consensus motif from a profile
 
@@ -154,10 +171,8 @@ def entropy(profile: dict[str, dict[int, float]], k) -> int:
     return e_total
     
 
-
 def score(prof: dict[str, dict[int, float]], k: int, motifs: list, scoring_function: str) -> int:
-    """find score of set of motifs using the consensus motif 
-    and hamming distance
+    """find score of set of motifs
 
     :param prof: profile of motifs
     :param k: size of motifs
@@ -180,6 +195,36 @@ def score(prof: dict[str, dict[int, float]], k: int, motifs: list, scoring_funct
         return entropy(prof, k)
             
 
+def parse_k(value):
+    if "-" in value:
+        start, end = map(int, value.split("-"))
+        return range(start, end + 1)
+    return [int(value)]
+
+
+def make_logo(best_motifs, output):
+    information = logomaker.alignment_to_matrix(
+        best_motifs,
+        to_type="information"
+    )
+
+    logo = logomaker.Logo(
+        information,
+        color_scheme="classic"
+    )
+
+    logo.ax.set_ylabel("Bits")
+    logo.ax.set_ylim(0, 2)
+
+    plt.savefig(
+        output,
+        format="svg",
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
+
 def main():
 
     # set up parser and add input and output arguements
@@ -188,55 +233,80 @@ def main():
     parser.add_argument('-o', '--output', required=True, help='output file')
     parser.add_argument('-s', '--scoring_function', required=False, default='Entropy', 
                         help='Defines scoring function used')
+    parser.add_argument('-k', '--kmer_size', required=False, default='8',
+                        help='Size of motifs')
 
     # parse arguements
     args = parser.parse_args()
 
-    # open input file in read mode and find 
-    # k and the sequences
-    with open(args.input, 'r') as f:
-        k = int(f.readline().strip().split(' ')[0])
-        dna_seq = []
+
+
+    dna_seq = []
+    current_seq = []
+
+    with open(args.input, "r") as f:
         for line in f:
-            dna_seq.append(line.strip())
+            line = line.strip()
+
+            if line.startswith(">"):
+                if current_seq:
+                    dna_seq.append("".join(current_seq))
+                    current_seq = []
+            else:
+                current_seq.append(line)
+
+        if current_seq:
+            dna_seq.append("".join(current_seq))
 
     # initalize list of best motifs and best score
-    best_motifs = []
-    best_score = float('inf')
+  
+    k_list = parse_k(args.kmer_size)
 
-    # find first sequence
-    dna_1 = dna_seq[0]
+    for k in k_list:
+        best_motifs = []
+        best_score = float('inf')
 
-    # for each kmer in the first sequence
-    for index in range(len(dna_1) - k + 1):
-
-        # build inital kmer and add it to current motifs
-        initial_kmer = dna_1[index:index+k]
-        current_motifs = [initial_kmer]
+        # initalize starting motifs
+        for seq in dna_seq:
+            random_start = randint(0, len(seq) - k)
+            best_motifs.append(seq[random_start:random_start+k])
 
         # for each sequence except the first sequence
-        for seq in dna_seq[1:]:
+        for i in range(10_000):
+            print(i)
+            random_index = randint(0, len(best_motifs) - 1)
+            current_motifs = best_motifs.copy()
+            current_motifs.pop(random_index)
+            seq = dna_seq[random_index]
 
             # find the current profile
             current_profile = profile(current_motifs, k)
 
+            new_motif = gibbs_sampler(current_profile, seq, k)
+
             # find the best motif according to profile and add it to current motifs
-            current_motifs.append(profile_most_probable(current_profile, seq, k))
+            current_motifs.insert(random_index, new_motif)
 
-        # find final profile and score 
-        final_profile = profile(current_motifs, k)
-        current_score = score(final_profile, k, current_motifs, args.scoring_function)
+            new_profile = profile(current_motifs, k)
 
-        # if score is better, its the best kmer profile
-        if current_score < best_score:
-            best_score = current_score
-            best_motifs = current_motifs
-        
-    # write best motifs to ouput file
-    with open(args.output, 'w') as o:
-        for motif in best_motifs:
-            o.write(f'{motif}\n')
-    
+            #  calculate current score
+            new_score = score(new_profile, k, current_motifs, args.scoring_function)
+
+            # compare to best score if its better than continue
+            if best_score > new_score:
+                best_motifs = current_motifs
+                best_score = new_score
+
+        output = args.output.split('.')
+        output.insert(1, f'_k{str(k)}.')
+        output_string = ''.join(output)
+        # write best motifs to ouput file
+        with open(output_string, 'w') as o:
+            for motif in best_motifs:
+                o.write(f'{motif}\n')
+        # print(best_motifs)
+        print(best_motifs)
+        make_logo(best_motifs=best_motifs, output=output_string.replace('.txt', '.svg'))        
 
 if __name__ == '__main__':
     main() 
