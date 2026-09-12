@@ -7,10 +7,15 @@ Author: Jimmy Capecci
 """
 
 import argparse
+import os
 import math
 from random import randint, random
 import logomaker
 import matplotlib.pyplot as plt
+from typing import Literal
+import math
+from copy import deepcopy
+import time
 
 
 def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
@@ -61,23 +66,44 @@ def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
     return perc_prof, count_prof
 
 
-def update_profile(count_profile, motif, num_of_motifs, action):
+def update_profile(
+    count_profile: dict[str, dict[int, int]],
+    motif: str,
+    num_of_motifs: int,
+    action: Literal["add", "remove"],
+) -> tuple[dict[str, dict[int, float]], dict[str, dict[int, int]]]:
+    """Update a motif count profile and rebuild the probability profile.
+
+    :param count_profile: Count table keyed by base then position.
+    :param motif: The motif being added or removed from the profile.
+    :param num_of_motifs: Number of motifs currently in the set.
+    :param action: Either "add" or "remove" to indicate the update direction.
+    :raises ValueError: If action is not "add" or "remove".
+    :return: A tuple containing the updated probability profile and updated count profile.
+    """
+
+    # if action is remove set variables to remove from profile
     if action == "remove":
         change = -1
         num_of_motifs -= 1
 
+    # if action is add set variables to add to profile
     elif action == "add":
         change = 1
         num_of_motifs += 1
 
+    # raise error if action isnt add or remove
     else:
         raise ValueError("action must be 'add' or 'remove'")
 
+    # perform change to count profile
     for position, base in enumerate(motif):
         count_profile[base][position] += change
 
+    # intialize empty perc_profile
     perc_profile = {}
 
+    # caluclate perc profile for each base
     for base in count_profile:
         perc_profile[base] = {}
 
@@ -99,7 +125,7 @@ def gibbs_sampler(prof: dict[str, dict[int, float]], seq: str, k:int) -> str:
     :return: motif with the highest probability
     """
 
-    # 
+    # intialize empty probability dict and sum
     kmer_prob_dict = {}
     prob_sum = 0
 
@@ -119,13 +145,13 @@ def gibbs_sampler(prof: dict[str, dict[int, float]], seq: str, k:int) -> str:
         kmer_prob_dict[kmer] = prob
         prob_sum += prob
 
-    # normalize the probabilities so they are between [0, 1]
+    # normalize the probabilities so they are floats between [0, 1]
     kmer_prob_normalized = {key: value / prob_sum for key, value in kmer_prob_dict.items()}
 
     # sort probabilities in ascending order
     sorted_kmer_prob = dict(sorted(kmer_prob_normalized.items(), key=lambda x: x[1]))
 
-    # draw random number between [0, 1]
+    # draw random float between [0, 1]
     draw = random()
     cumulative = 0.0
 
@@ -195,6 +221,9 @@ def entropy(profile: dict[str, dict[int, float]], k) -> int:
     :return: Entropy score
     """
     e_total = 0
+
+    # for each position calculate shannon entropy for each base
+    # add to total
     for pos in range(k):
         for base in ('A', 'T', 'C', 'G'):
             prob = profile[base][pos]
@@ -228,27 +257,42 @@ def score(prof: dict[str, dict[int, float]], k: int, motifs: list, scoring_funct
         return entropy(prof, k)
             
 
-def parse_k(value):
+def parse_k(value: str) -> list[int]:
+    """Parse user input K to return a list of K to explore
+
+    :param value: range of k in string
+    :return: list of integers k's
+    """
     if "-" in value:
         start, end = map(int, value.split("-"))
         return range(start, end + 1)
     return [int(value)]
 
 
-def make_logo(best_motifs, output):
+def make_logo(best_motifs: list[str], output: str):
+    """makes motif logo and saves it to output
+
+    :param best_motifs: motifs to make logo
+    :param output: output of graph
+    """
+
+    # Convert the motif alignment to an information-content matrix in bits
     information = logomaker.alignment_to_matrix(
         best_motifs,
         to_type="information"
     )
 
+    # Create a sequence logo from the information-content matrix
     logo = logomaker.Logo(
         information,
         color_scheme="classic"
     )
 
+    # set y label to bits and y range 0 to 2
     logo.ax.set_ylabel("Bits")
     logo.ax.set_ylim(0, 2)
 
+    # save figure to output
     plt.savefig(
         output,
         format="svg",
@@ -259,61 +303,106 @@ def make_logo(best_motifs, output):
 
 
 def main():
+    print('Finding motifs')
+    
 
     # set up parser and add input and output arguements
-    parser = argparse.ArgumentParser(description='Greedy Motif Search')
+    parser = argparse.ArgumentParser(description='Gibbs-based Algorithm for Motif Prediction')
     parser.add_argument('-i', '--input', required=True, help='input file')
-    parser.add_argument('-o', '--output', required=True, help='output file')
+    parser.add_argument('-o', '--output', required=False, help='output file')
     parser.add_argument('-s', '--scoring_function', required=False, default='Entropy', 
                         help='Defines scoring function used')
     parser.add_argument('-k', '--kmer_size', required=False, default='8',
                         help='Size of motifs')
     parser.add_argument('--iterations', required=False, help='Number of iterations loop makes')
+    parser.add_argument('-t', '--temp', required=False, type=int, default=10, help='Temperature of simulated annealing algorithm')
 
     # parse arguements
     args = parser.parse_args()
 
+    # intialize empty list to hold sequences
     dna_seq = []
     current_seq = []
+    headers = []
 
+    # with input file do the following
     with open(args.input, "r") as f:
+
+        # for each line strip new lines
         for line in f:
             line = line.strip()
 
+            # if line is a header grab
             if line.startswith(">"):
+                headers.append(line) #  grab the header
                 if current_seq:
-                    dna_seq.append("".join(current_seq))
-                    current_seq = []
+                    dna_seq.append("".join(current_seq)) # join line and add to dna_seq
+                    current_seq = [] # reintialize empty current_seq
+
+            # if line isnt a header add to current seq list
             else:
                 current_seq.append(line)
 
+        # account for edge case, the last sequence
         if current_seq:
             dna_seq.append("".join(current_seq))
 
+    # set default iterartions if not given
     if args.iterations is None:
-        iterations = len(dna_seq) * 10
+        iterations = len(dna_seq) * 10 # ten times the size of totla sequences
     else:
-        iterations = int(args.iterations)
+        iterations = int(args.iterations) # turn iterartions into a integer
 
-    # initalize list of best motifs and best score
-  
+    # set default output if not given
+    if args.output is None:
+        os.makedirs('Results', exist_ok=True) 
+        output = 'Results/motifs'
+    else:
+        output = args.output
+
+    if args.temp <= 0:
+        raise ValueError("--temp must be greater than 0")
+
+    # standardize cooling rate based off of temp and iterations
+    # ensures final temp is 0.1
+    cool = (0.1 / args.temp) ** (1 / iterations)
+
+    # parse input k to  make it a list
     k_list = parse_k(args.kmer_size)
 
+    # use every value of k and do the following
     for k in k_list:
+        start = time.perf_counter()
+
+        # intialize empty list of best_motifs
         best_motifs = []
-        best_score = float('inf')
 
         # initalize starting motifs
         for seq in dna_seq:
             random_start = randint(0, len(seq) - k)
             best_motifs.append(seq[random_start:random_start+k])
 
+        # set up starting profile and starting motifs
         current_motifs = best_motifs.copy()
         current_profile, c_profile = profile(current_motifs, k)
 
+        # initalize current and best scores
+        current_score = score(current_profile, k, current_motifs, args.scoring_function)
+        best_score = current_score
+        best_motifs = current_motifs.copy()
+
+        # for each iteration do the following
         for i in range(iterations):
+
+            # keep a snapshot of the current state for rollback on rejected moves
+            prev_motifs = current_motifs.copy()
+            prev_profile = deepcopy(current_profile)
+            prev_count_profile = deepcopy(c_profile)
+
+            # set random index
             random_index = randint(0, len(current_motifs) - 1)
 
+            # create progress bar
             progress = (i + 1) / iterations
             bar_width = 40
             filled = int(progress * bar_width)
@@ -323,6 +412,7 @@ def main():
             # Remove old motif
             remove_motif = current_motifs.pop(random_index)
 
+            # set new profiles without motif
             current_profile, c_profile = update_profile(
                 c_profile,
                 remove_motif,
@@ -339,6 +429,7 @@ def main():
             # Add new motif
             current_motifs.insert(random_index, new_motif)
 
+            # update profile with new motif
             current_profile, c_profile = update_profile(
                 c_profile,
                 new_motif,
@@ -354,20 +445,46 @@ def main():
                 args.scoring_function
             )
 
-            if best_score > new_score:
-                best_motifs = current_motifs.copy()
-                best_score = new_score
+            # Simulated annealing algorithm:
+            # always accept better scores
+            if new_score < current_score:
+                current_score = new_score
+                if new_score < best_score:
+                    best_motifs = current_motifs.copy()
+                    best_score = new_score
 
-        print('\r' + ' ' * 80 + '\r', end='')
+            # sometimes accept worse scores
+            else:
+                delta = new_score - current_score # take delta score
+                prob = math.exp(-delta / args.temp) # find acceptance probability
+                if random() < prob: # draw random floats and sometiems accept worse scores
+                    current_score = new_score
+                    if new_score < best_score:
+                        best_motifs = current_motifs.copy()
+                        best_score = new_score
 
-        output = args.output.split('.')
-        output.insert(1, f'_k{str(k)}.')
-        output_string = ''.join(output)
+                # else keep previous motifs
+                else:
+                    current_motifs = prev_motifs
+                    current_profile = prev_profile
+                    c_profile = prev_count_profile
+
+            # lower temperature to be less exploratory 
+            args.temp *= cool
+
+        print()
+
+        # create output string wiuth k value attached to end
+        output_string = output + f'_k{str(k)}'
+
         # write best motifs to ouput file
-        with open(output_string, 'w') as o:
+        with open(output_string + '.txt', 'w') as o:
             for motif in best_motifs:
                 o.write(f'{motif}\n')
-        make_logo(best_motifs=best_motifs, output=output_string.replace('.txt', '.svg'))        
+        make_logo(best_motifs=best_motifs, output=output_string + '.svg')   
+
+        end = time.perf_counter()
+        print(f'Time to run: {end-start:.2f} seconds')     
 
 if __name__ == '__main__':
     main() 

@@ -196,6 +196,7 @@ def score(prof: dict[str, dict[int, float]], k: int, motifs: list, scoring_funct
             
 
 def parse_k(value):
+    
     if "-" in value:
         start, end = map(int, value.split("-"))
         return range(start, end + 1)
