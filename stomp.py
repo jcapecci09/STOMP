@@ -16,6 +16,7 @@ from typing import Literal
 import math
 from copy import deepcopy
 import time
+import pandas as pd
 
 
 def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
@@ -76,37 +77,25 @@ def update_profile(
 
     :param count_profile: Count table keyed by base then position.
     :param motif: The motif being added or removed from the profile.
-    :param num_of_motifs: Number of motifs currently in the set.
+    :param num_of_motifs: Number of motifs currently in the set after the change.
     :param action: Either "add" or "remove" to indicate the update direction.
     :raises ValueError: If action is not "add" or "remove".
     :return: A tuple containing the updated probability profile and updated count profile.
     """
 
-    # if action is remove set variables to remove from profile
     if action == "remove":
         change = -1
-        num_of_motifs -= 1
-
-    # if action is add set variables to add to profile
     elif action == "add":
         change = 1
-        num_of_motifs += 1
-
-    # raise error if action isnt add or remove
     else:
         raise ValueError("action must be 'add' or 'remove'")
 
-    # perform change to count profile
     for position, base in enumerate(motif):
         count_profile[base][position] += change
 
-    # intialize empty perc_profile
     perc_profile = {}
-
-    # caluclate perc profile for each base
     for base in count_profile:
         perc_profile[base] = {}
-
         for position in count_profile[base]:
             perc_profile[base][position] = (
                 count_profile[base][position] /
@@ -303,8 +292,6 @@ def make_logo(best_motifs: list[str], output: str):
 
 
 def main():
-    print('Finding motifs')
-    
 
     # set up parser and add input and output arguements
     parser = argparse.ArgumentParser(description='Gibbs-based Algorithm for Motif Prediction')
@@ -315,6 +302,7 @@ def main():
     parser.add_argument('-k', '--kmer_size', required=False, default='8',
                         help='Size of motifs')
     parser.add_argument('--iterations', required=False, help='Number of iterations loop makes')
+    parser.add_argument('--restart', required=False, type=int, help='Number of times the algorithm does a full restart', default=3)
     parser.add_argument('-t', '--temp', required=False, type=int, default=10, help='Temperature of simulated annealing algorithm')
 
     # parse arguements
@@ -363,128 +351,159 @@ def main():
     if args.temp <= 0:
         raise ValueError("--temp must be greater than 0")
 
-    # standardize cooling rate based off of temp and iterations
-    # ensures final temp is 0.1
-    cool = (0.1 / args.temp) ** (1 / iterations)
-
     # parse input k to  make it a list
     k_list = parse_k(args.kmer_size)
 
     # use every value of k and do the following
     for k in k_list:
         start = time.perf_counter()
+        initial_temperature = args.temp
+        cool = (0.1 / initial_temperature) ** (1 / iterations)
+        best_overall_motifs = []
+        best_overall_score = float('inf')
+        best_overall_initial_score = None
 
-        # intialize empty list of best_motifs
-        best_motifs = []
+        for restart in range(args.restart):
+            # intialize empty list of best_motifs
+            best_motifs = []
 
-        # initalize starting motifs
-        for seq in dna_seq:
-            random_start = randint(0, len(seq) - k)
-            best_motifs.append(seq[random_start:random_start+k])
+            # initalize starting motifs
+            for seq in dna_seq:
+                random_start = randint(0, len(seq) - k)
+                best_motifs.append(seq[random_start:random_start+k])
 
-        # set up starting profile and starting motifs
-        current_motifs = best_motifs.copy()
-        current_profile, c_profile = profile(current_motifs, k)
+            # set up starting profile and starting motifs
+            current_motifs = best_motifs.copy()
+            current_profile, c_profile = profile(current_motifs, k)
 
-        # initalize current and best scores
-        current_score = score(current_profile, k, current_motifs, args.scoring_function)
-        best_score = current_score
-        best_motifs = current_motifs.copy()
+            # initalize current and best scores
+            current_score = score(current_profile, k, current_motifs, args.scoring_function)
+            initial_score = current_score
+            best_score = current_score
+            best_motifs = current_motifs.copy()
+            temperature = initial_temperature
 
-        # for each iteration do the following
-        for i in range(iterations):
+            # for each iteration do the following
+            for i in range(iterations):
 
-            # keep a snapshot of the current state for rollback on rejected moves
-            prev_motifs = current_motifs.copy()
-            prev_profile = deepcopy(current_profile)
-            prev_count_profile = deepcopy(c_profile)
+                # keep a snapshot of the current state for rollback on rejected moves
+                prev_motifs = current_motifs.copy()
+                prev_profile = deepcopy(current_profile)
+                prev_count_profile = deepcopy(c_profile)
 
-            # set random index
-            random_index = randint(0, len(current_motifs) - 1)
+                progress = (i + 1) / iterations
+                bar_width = 40
+                filled = int(progress * bar_width)
+                bar = '#' * filled + '-' * (bar_width - filled)
+                print(
+                    f'\r[k={k}, restart={restart + 1}] [{bar}] {i + 1}/{iterations} {progress * 100:.1f}%',
+                    end='',
+                    flush=True,
+                )
 
-            # create progress bar
-            progress = (i + 1) / iterations
-            bar_width = 40
-            filled = int(progress * bar_width)
-            bar = '#' * filled + '-' * (bar_width - filled)
-            print(f'\r[k={k}] [{bar}] {i + 1}/{iterations} {progress * 100:.1f}%', end='', flush=True)
+                # set random index
+                random_index = randint(0, len(current_motifs) - 1)
 
-            # Remove old motif
-            remove_motif = current_motifs.pop(random_index)
+                # Remove old motif
+                remove_motif = current_motifs.pop(random_index)
 
-            # set new profiles without motif
-            current_profile, c_profile = update_profile(
-                c_profile,
-                remove_motif,
-                len(current_motifs) + 1,
-                'remove'
-            )
+                # set new profiles without motif
+                current_profile, c_profile = update_profile(
+                    c_profile,
+                    remove_motif,
+                    len(current_motifs),
+                    'remove'
+                )
 
-            # Sequence corresponding to removed motif
-            seq = dna_seq[random_index]
+                # Sequence corresponding to removed motif
+                seq = dna_seq[random_index]
 
-            # Choose new motif using profile without old motif
-            new_motif = gibbs_sampler(current_profile, seq, k)
+                # Choose new motif using profile without old motif
+                new_motif = gibbs_sampler(current_profile, seq, k)
 
-            # Add new motif
-            current_motifs.insert(random_index, new_motif)
+                # Add new motif
+                current_motifs.insert(random_index, new_motif)
 
-            # update profile with new motif
-            current_profile, c_profile = update_profile(
-                c_profile,
-                new_motif,
-                len(current_motifs) - 1,
-                'add'
-            )
+                # update profile with new motif
+                current_profile, c_profile = update_profile(
+                    c_profile,
+                    new_motif,
+                    len(current_motifs),
+                    'add'
+                )
 
-            # Calculate score
-            new_score = score(
-                current_profile,
-                k,
-                current_motifs,
-                args.scoring_function
-            )
+                # Calculate score
+                new_score = score(
+                    current_profile,
+                    k,
+                    current_motifs,
+                    args.scoring_function
+                )
 
-            # Simulated annealing algorithm:
-            # always accept better scores
-            if new_score < current_score:
-                current_score = new_score
-                if new_score < best_score:
-                    best_motifs = current_motifs.copy()
-                    best_score = new_score
-
-            # sometimes accept worse scores
-            else:
-                delta = new_score - current_score # take delta score
-                prob = math.exp(-delta / args.temp) # find acceptance probability
-                if random() < prob: # draw random floats and sometiems accept worse scores
+                # Simulated annealing algorithm:
+                # always accept better scores
+                if new_score < current_score:
                     current_score = new_score
                     if new_score < best_score:
                         best_motifs = current_motifs.copy()
                         best_score = new_score
 
-                # else keep previous motifs
+                # sometimes accept worse scores
                 else:
-                    current_motifs = prev_motifs
-                    current_profile = prev_profile
-                    c_profile = prev_count_profile
+                    delta = new_score - current_score
+                    prob = math.exp(-delta / temperature)
+                    if random() < prob:
+                        current_score = new_score
+                        if new_score < best_score:
+                            best_motifs = current_motifs.copy()
+                            best_score = new_score
+                    else:
+                        current_motifs = prev_motifs
+                        current_profile = prev_profile
+                        c_profile = prev_count_profile
 
-            # lower temperature to be less exploratory 
-            args.temp *= cool
+                temperature *= cool
 
-        print()
+            print()
+
+            if best_score < best_overall_score:
+                best_overall_score = best_score
+                best_overall_initial_score = initial_score
+                best_overall_motifs = best_motifs.copy()
+
+        if not best_overall_motifs:
+            best_overall_motifs = best_motifs.copy()
+            best_overall_score = best_score
+            best_overall_initial_score = initial_score
 
         # create output string wiuth k value attached to end
         output_string = output + f'_k{str(k)}'
 
         # write best motifs to ouput file
         with open(output_string + '.txt', 'w') as o:
-            for motif in best_motifs:
+            for motif in best_overall_motifs:
                 o.write(f'{motif}\n')
-        make_logo(best_motifs=best_motifs, output=output_string + '.svg')   
+        make_logo(best_motifs=best_overall_motifs, output=output_string + '.svg')
 
+        final_profile, _ = profile(best_overall_motifs, k)
+        final_score = score(final_profile, k, best_overall_motifs, args.scoring_function)
+
+        df = pd.DataFrame(final_profile)
+        df.to_csv(output_string + '_pwm' +'.csv', index=False)
         end = time.perf_counter()
-        print(f'Time to run: {end-start:.2f} seconds')     
+        print(f'Time to run: {end-start:.2f} seconds')
+
+        with open(output_string + '_scores.txt',  'w') as o1:
+            o1.write(f'Length: {k}\n')
+            o1.write(f'Consensus: {consensus(final_profile, k)}\n')
+            o1.write(f'Inital Score: {best_overall_initial_score}\n')
+            o1.write(f'Best Score: {best_overall_score}\n')
+            o1.write(f'Final Score: {final_score}\n')
+            o1.write(f'Iterations: {iterations}\n')
+            o1.write(f'Restarts: {args.restart}\n')
+            o1.write(f'Time: {end-start:.2f}\n')
+        
+        
 
 if __name__ == '__main__':
     main() 
