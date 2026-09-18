@@ -1,3 +1,5 @@
-# 📊 Benchmarks
-I plan to return to this project and benchmark STOMP against other motif discovery tools. I have performed some preliminary benchmarking, but it has not been rigorous enough to draw strong conclusions. Initial results suggest that STOMP can identify motifs that are consistent with those reported in the JASPAR database, but a more systematic evaluation is needed to quantify its accuracy and performance.
+## 📊 Benchmarks
+
+
+> I plan to return to this project and benchmark STOMP against other motif discovery tools. I have performed some preliminary benchmarking, but it has not been rigorous enough to draw strong conclusions. Initial results suggest that STOMP can identify motifs that are consistent with those reported in the JASPAR database, but a more systematic evaluation is needed to quantify its accuracy and performance.
 ---
