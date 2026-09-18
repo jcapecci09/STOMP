@@ -60,7 +60,7 @@ Each run creates a timestamped results folder containing:
 
 ---
 
-**[📊 Benchmarks](BENCHMARKS.md)**
+**[📊 Benchmarks](benchmarks.md)**
 
 ---
 ## 👤 Author
