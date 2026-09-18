@@ -1,7 +1,8 @@
-"""Gibbs-based Algorithm for Motif Prediction (GAMP)
+"""Stochastic Technique for Optimization of Motifs (STOMP)
 
 Reads DNA sequences and motif length from an input file and finds the
-most likely set of motifs using a gibbs sampler, motif profiles, 
+most likely set of motifs using a gibbs sampler, motif profiles, and
+simulated annealing. 
 
 Author: Jimmy Capecci
 """
@@ -17,6 +18,8 @@ import math
 from copy import deepcopy
 import time
 import pandas as pd
+from pathlib import Path
+from datetime import datetime
 
 
 def profile(motifs: list, k: int) -> dict[str, dict[int, float]]:
@@ -232,7 +235,7 @@ def score(prof: dict[str, dict[int, float]], k: int, motifs: list, scoring_funct
     :return: score
     """
 
-    if scoring_function == 'Hamming':
+    if scoring_function == 'hamming':
         # find the consensus motif
         consensus_string = consensus(prof, k)
         final_score = 0
@@ -296,8 +299,8 @@ def main():
     # set up parser and add input and output arguements
     parser = argparse.ArgumentParser(description='Gibbs-based Algorithm for Motif Prediction')
     parser.add_argument('-i', '--input', required=True, help='input file')
-    parser.add_argument('-o', '--output', required=False, help='output file')
-    parser.add_argument('-s', '--scoring_function', required=False, default='Entropy', 
+    parser.add_argument('-o', '--output_directory', required=False, default='Results', help='Output Directory')
+    parser.add_argument('-s', '--scoring_function', required=False, type=str.lower, default='entropy', 
                         help='Defines scoring function used')
     parser.add_argument('-k', '--kmer_size', required=False, default='8',
                         help='Size of motifs')
@@ -337,32 +340,49 @@ def main():
 
     # set default iterartions if not given
     if args.iterations is None:
-        iterations = len(dna_seq) * 10 # ten times the size of totla sequences
+        iterations = len(dna_seq) * 50 # hundred times the size of total sequences
     else:
         iterations = int(args.iterations) # turn iterartions into a integer
 
-    # set default output if not given
-    if args.output is None:
-        os.makedirs('Results', exist_ok=True) 
-        output = 'Results/motifs'
-    else:
-        output = args.output
+    # set directory
+    output_dir = Path(args.output_directory)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
+    # make output unique
+    input_name = Path(args.input).stem
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = output_dir / f"{input_name}_motifs_{timestamp}"
+    run_dir.mkdir()
+
+    # ensure correct temp is  given
     if args.temp <= 0:
         raise ValueError("--temp must be greater than 0")
+
+    # ensure correct scoring function is given
+    if args.scoring_function not in ['hamming', 'entropy']:
+        raise ValueError("-s must be 'entropy' or 'hamming'")
 
     # parse input k to  make it a list
     k_list = parse_k(args.kmer_size)
 
     # use every value of k and do the following
     for k in k_list:
+
+        # start clock to check time
         start = time.perf_counter()
+
+        # start with inital temp
         initial_temperature = args.temp
+
+        # set cooling 
         cool = (0.1 / initial_temperature) ** (1 / iterations)
+
+        # track best motifs, best scores, and intial score
         best_overall_motifs = []
         best_overall_score = float('inf')
         best_overall_initial_score = None
 
+        # do full restart on algorithm
         for restart in range(args.restart):
             # intialize empty list of best_motifs
             best_motifs = []
@@ -391,6 +411,7 @@ def main():
                 prev_profile = deepcopy(current_profile)
                 prev_count_profile = deepcopy(c_profile)
 
+                # progress bar
                 progress = (i + 1) / iterations
                 bar_width = 40
                 filled = int(progress * bar_width)
@@ -452,50 +473,70 @@ def main():
                 else:
                     delta = new_score - current_score
                     prob = math.exp(-delta / temperature)
+
+                    # accept worse score
                     if random() < prob:
                         current_score = new_score
+
+                        # keep track of best score throughout algorithm
                         if new_score < best_score:
                             best_motifs = current_motifs.copy()
                             best_score = new_score
+
+                    # stay with better score
                     else:
                         current_motifs = prev_motifs
                         current_profile = prev_profile
                         c_profile = prev_count_profile
 
+                # cool temp to accept fewer worse scores as you go further through the loop
                 temperature *= cool
 
-            print()
+            print() # keeps progress bar
 
+            # track best overall score, motifs, and inital score from the repeats
             if best_score < best_overall_score:
                 best_overall_score = best_score
                 best_overall_initial_score = initial_score
                 best_overall_motifs = best_motifs.copy()
 
+        # If score never improves fall back
         if not best_overall_motifs:
             best_overall_motifs = best_motifs.copy()
             best_overall_score = best_score
             best_overall_initial_score = initial_score
 
+
         # create output string wiuth k value attached to end
-        output_string = output + f'_k{str(k)}'
+        output_string = run_dir / f"motifs_k{k}"
 
         # write best motifs to ouput file
-        with open(output_string + '.txt', 'w') as o:
+        with open(output_string.with_suffix('.txt'), 'w') as o:
             for motif in best_overall_motifs:
                 o.write(f'{motif}\n')
-        make_logo(best_motifs=best_overall_motifs, output=output_string + '.svg')
 
+        # make logo and save
+        make_logo(best_motifs=best_overall_motifs, output=output_string.with_suffix('.svg'))
+
+        # Grab final profile and final score
         final_profile, _ = profile(best_overall_motifs, k)
         final_score = score(final_profile, k, best_overall_motifs, args.scoring_function)
 
+        # save profile matrix to csv
         df = pd.DataFrame(final_profile)
-        df.to_csv(output_string + '_pwm' +'.csv', index=False)
+        pwm_file = output_string.parent / f'{output_string.stem}_pwm.csv'
+        df.to_csv(pwm_file, index=False)
+
+        # print time take by algorithm
         end = time.perf_counter()
         print(f'Time to run: {end-start:.2f} seconds')
 
-        with open(output_string + '_scores.txt',  'w') as o1:
+        score_file = output_string.parent / f'{output_string.stem}_scores.txt'
+        # write final statistics to text file
+        with open(score_file,  'w') as o1:
             o1.write(f'Length: {k}\n')
             o1.write(f'Consensus: {consensus(final_profile, k)}\n')
+            o1.write(f'Scoring Function: {args.scoring_function}\n')
             o1.write(f'Inital Score: {best_overall_initial_score}\n')
             o1.write(f'Best Score: {best_overall_score}\n')
             o1.write(f'Final Score: {final_score}\n')
@@ -504,6 +545,5 @@ def main():
             o1.write(f'Time: {end-start:.2f}\n')
         
         
-
 if __name__ == '__main__':
     main() 

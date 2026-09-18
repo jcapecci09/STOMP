@@ -1,0 +1,19 @@
+name: noise
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.13
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - biopython
+  - ipykernel
+  - jupyter
+  - pip
+  - logomaker
+  - pip:
+      - git+https://github.com/jcapecci09/MultiFastaCollector.git
+      - git+https://github.com/jcapecci09/FASTA-Reformater.git
