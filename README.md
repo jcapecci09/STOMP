@@ -3,3 +3,7 @@
 
 ---
 ![](assets/09182-ezgif.com-video-to-gif-converter.gif)
+
+---
+## 🙏 Acknowledgements
+This project is largely based on the concepts discussed in Chapter 3 of Bioinformatics Algorithms: An Active-Learning Approach by Phillip Compeau and Pavel Pevzner.
