@@ -22,7 +22,10 @@
 ---
 
 ## 👤 Author
+
 I'm Jimmy Capecci, a Bioinformatics master's student at Loyola University Chicago. I was introduced to algorithms used in motif discovery in my advanced bioinformatics course, and I wanted to make a reusable tool to really understand the algorithms. STOMP was created as a way to apply these concepts in practice while building a tool that can identify motifs in DNA sequences.
+
 ---
 ## 🙏 Acknowledgements
+
 This project is largely based on the concepts discussed in Chapter 3 of *Bioinformatics Algorithms: An Active-Learning Approach* by Phillip Compeau and Pavel Pevzner.
