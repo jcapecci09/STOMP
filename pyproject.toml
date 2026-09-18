@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stomp"
+version = "1.0.0"
+description = "STOMP motif discovery tool for DNA sequence analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "logomaker",
+    "matplotlib",
+    "pandas",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[project.scripts]
+stomp = "src.stomp:main"
